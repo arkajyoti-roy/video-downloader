@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dual Video Downloader</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; max-width: 800px; margin: 3rem auto; text-align: center; background: #1a1a1a; color: #fff; }
+        .input-group { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
+        input { width: 60%; padding: 12px; border-radius: 5px; border: none; font-size: 16px; outline: none; }
+        button { padding: 12px 20px; cursor: pointer; color: white; border: none; border-radius: 5px; font-size: 15px; font-weight: 600; margin: 0 5px; }
+        .fetch-btn { background: #007bff; }
+        .fetch-btn:hover { background: #0056b3; }
+        
+        .status { margin-top: 15px; font-family: monospace; color: #ffd700; height: 20px; }
+        
+        #video-container { margin-top: 30px; display: none; background: #2a2a2a; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        video { width: 100%; border-radius: 8px; background: #000; margin-bottom: 15px; max-height: 500px; }
+        
+        .controls { display: flex; align-items: center; justify-content: center; gap: 15px; background: #333; padding: 15px; border-radius: 8px; flex-wrap: wrap; }
+        select { padding: 10px; border-radius: 4px; font-size: 15px; cursor: pointer; }
+        
+        /* Different colors for buttons */
+        .btn-server { background: #6f42c1; } /* Purple */
+        .btn-server:hover { background: #5a32a3; }
+        .btn-browser { background: #28a745; } /* Green */
+        .btn-browser:hover { background: #218838; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+
+    <h1>Dual-Mode Video Downloader</h1>
+    
+    <div class="input-group">
+        <input type="text" id="linkInput" placeholder="Paste video link here...">
+        <button class="fetch-btn" onclick="getVideo()">Fetch Video</button>
+    </div>
+
+    <p id="status" class="status"></p>
+
+    <div id="video-container">
+        <h3 id="videoTitle">Loading...</h3>
+        
+        <video id="videoPlayer" controls></video>
+        
+        <div class="controls">
+            <label>Quality:</label>
+            <select id="qualitySelect">
+                <option value="">Best (MP4)</option>
+            </select>
+            
+            <button class="btn-browser" onclick="downloadToBrowser()">⬇ Download to PC (Browser)</button>
+            
+            <button class="btn-server" onclick="downloadToServer()">💾 Save to Server Folder</button>
+        </div>
+    </div>
+
+    <script>
+        let currentUrl = '';
+        let currentTitle = '';
+
+        async function getVideo() {
+            const url = document.getElementById('linkInput').value;
+            const status = document.getElementById('status');
+            const container = document.getElementById('video-container');
+            const video = document.getElementById('videoPlayer');
+            const titleDisplay = document.getElementById('videoTitle');
+            const qualitySelect = document.getElementById('qualitySelect');
+
+            if (!url) return alert("Please paste a link first");
+
+            currentUrl = url;
+            status.innerText = "Analyzing link...";
+            container.style.display = 'none';
+            video.pause();
+            video.src = "";
+            qualitySelect.innerHTML = '<option value="">Best (MP4)</option>';
+
+            try {
+                const response = await fetch('/get-video', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                const data = await response.json();
+
+                if (data.error) {
+                    status.innerText = "Error: " + data.error;
+                    return;
+                }
+
+                status.innerText = "Ready!";
+                container.style.display = 'block';
+                currentTitle = data.title;
+                titleDisplay.innerText = data.title;
+
+                if (data.qualities && data.qualities.length > 0) {
+                    data.qualities.forEach(q => {
+                        const option = document.createElement('option');
+                        option.value = q;
+                        option.text = `${q}p`;
+                        qualitySelect.appendChild(option);
+                    });
+                }
+
+                if (Hls.isSupported() && data.streamUrl.includes('.m3u8')) {
+                    const hls = new Hls();
+                    hls.loadSource(data.streamUrl);
+                    hls.attachMedia(video);
+                } else {
+                    video.src = data.streamUrl;
+                }
+                
+            } catch (err) {
+                status.innerText = "Server Error.";
+            }
+        }
+
+        // OPTION 1: Download via Browser (Hidden Form)
+        function downloadToBrowser() {
+            const status = document.getElementById('status');
+            const quality = document.getElementById('qualitySelect').value;
+            
+            status.innerText = "🚀 Downloading to Browser... Check downloads bar.";
+
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/download-to-browser';
+            form.style.display = 'none';
+
+            const inputs = [
+                { name: 'url', value: currentUrl },
+                { name: 'quality', value: quality },
+                { name: 'title', value: currentTitle }
+            ];
+
+            inputs.forEach(item => {
+                const input = document.createElement('input');
+                input.name = item.name;
+                input.value = item.value;
+                form.appendChild(input);
+            });
+
+            document.body.appendChild(form);
+            form.submit();
+            document.body.removeChild(form);
+        }
+
+        // OPTION 2: Download to Server (AJAX Request)
+        async function downloadToServer() {
+            const status = document.getElementById('status');
+            const quality = document.getElementById('qualitySelect').value;
+            
+            status.innerText = "💾 Downloading to Server folder... Check Terminal for progress.";
+
+            try {
+                const response = await fetch('/download-to-server', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: currentUrl, quality: quality })
+                });
+                const result = await response.json();
+                
+                if (result.success) {
+                    status.innerText = "✅ " + result.message;
+                } else {
+                    status.innerText = "❌ Server download failed.";
+                }
+            } catch (e) {
+                status.innerText = "Error connecting to server.";
+            }
+        }
+    </script>
+</body>
+</html>
